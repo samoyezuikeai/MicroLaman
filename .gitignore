@@ -1,0 +1,17 @@
+# Visual Studio user-specific files
+.vs/
+*.user
+*.suo
+
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# NuGet packages are restored from packages.config
+packages/
+!packages/repositories.config
+
+# Visual Studio backups and temporary files
+*~
+*.tmp
+*.log
