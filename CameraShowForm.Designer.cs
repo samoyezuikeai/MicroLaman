@@ -2,14 +2,14 @@ namespace MicroLaman
 {
     partial class CameraShowForm
     {
+        private System.Windows.Forms.Panel previewPanel;
+        private System.Windows.Forms.Label statusLabel;
         private System.ComponentModel.IContainer components = null;
 
         protected override void Dispose(bool disposing)
         {
             if (disposing && (components != null))
-            {
                 components.Dispose();
-            }
             base.Dispose(disposing);
         }
 
@@ -17,95 +17,53 @@ namespace MicroLaman
 
         private void InitializeComponent()
         {
-            this.previewBox = new System.Windows.Forms.PictureBox();
-            this.titleLabel = new System.Windows.Forms.Label();
+            this.previewPanel = new System.Windows.Forms.Panel();
             this.statusLabel = new System.Windows.Forms.Label();
-            this.captureButton = new System.Windows.Forms.Button();
-            this.closeButton = new System.Windows.Forms.Button();
-            ((System.ComponentModel.ISupportInitialize)(this.previewBox)).BeginInit();
+            this.previewPanel.SuspendLayout();
             this.SuspendLayout();
             // 
-            // previewBox
+            // previewPanel
             // 
-            this.previewBox.BackColor = System.Drawing.Color.FromArgb(32, 32, 32);
-            this.previewBox.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.previewBox.Location = new System.Drawing.Point(18, 48);
-            this.previewBox.Name = "previewBox";
-            this.previewBox.Size = new System.Drawing.Size(604, 340);
-            this.previewBox.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
-            this.previewBox.TabIndex = 0;
-            this.previewBox.TabStop = false;
-            // 
-            // titleLabel
-            // 
-            this.titleLabel.AutoSize = true;
-            this.titleLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 12F, System.Drawing.FontStyle.Bold);
-            this.titleLabel.Location = new System.Drawing.Point(14, 14);
-            this.titleLabel.Name = "titleLabel";
-            this.titleLabel.Size = new System.Drawing.Size(90, 22);
-            this.titleLabel.TabIndex = 1;
-            this.titleLabel.Text = "相机预览";
+            this.previewPanel.BackColor = System.Drawing.Color.Black;
+            this.previewPanel.Controls.Add(this.statusLabel);
+            this.previewPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.previewPanel.Location = new System.Drawing.Point(0, 0);
+            this.previewPanel.Name = "previewPanel";
+            this.previewPanel.Size = new System.Drawing.Size(889, 661);
+            this.previewPanel.TabIndex = 0;
+            this.previewPanel.Resize += new System.EventHandler(this.PreviewPanel_Resize);
             // 
             // statusLabel
             // 
-            this.statusLabel.AutoEllipsis = true;
-            this.statusLabel.Location = new System.Drawing.Point(18, 405);
+            this.statusLabel.BackColor = System.Drawing.Color.Transparent;
+            this.statusLabel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.statusLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 12F);
+            this.statusLabel.ForeColor = System.Drawing.Color.Gainsboro;
+            this.statusLabel.Location = new System.Drawing.Point(0, 0);
             this.statusLabel.Name = "statusLabel";
-            this.statusLabel.Size = new System.Drawing.Size(360, 23);
-            this.statusLabel.TabIndex = 2;
-            this.statusLabel.Text = "相机尚未连接";
-            this.statusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
-            // 
-            // captureButton
-            // 
-            this.captureButton.Location = new System.Drawing.Point(452, 400);
-            this.captureButton.Name = "captureButton";
-            this.captureButton.Size = new System.Drawing.Size(82, 29);
-            this.captureButton.TabIndex = 3;
-            this.captureButton.Text = "拍照";
-            this.captureButton.UseVisualStyleBackColor = true;
-            this.captureButton.Click += new System.EventHandler(this.CaptureButton_Click);
-            // 
-            // closeButton
-            // 
-            this.closeButton.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.closeButton.Location = new System.Drawing.Point(540, 400);
-            this.closeButton.Name = "closeButton";
-            this.closeButton.Size = new System.Drawing.Size(82, 29);
-            this.closeButton.TabIndex = 4;
-            this.closeButton.Text = "关闭";
-            this.closeButton.UseVisualStyleBackColor = true;
-            this.closeButton.Click += new System.EventHandler(this.CloseButton_Click);
+            this.statusLabel.Size = new System.Drawing.Size(889, 661);
+            this.statusLabel.TabIndex = 0;
+            this.statusLabel.Text = "正在连接相机…";
+            this.statusLabel.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             // 
             // CameraShowForm
             // 
-            this.AcceptButton = this.captureButton;
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.CancelButton = this.closeButton;
-            this.ClientSize = new System.Drawing.Size(640, 445);
-            this.Controls.Add(this.closeButton);
-            this.Controls.Add(this.captureButton);
-            this.Controls.Add(this.statusLabel);
-            this.Controls.Add(this.titleLabel);
-            this.Controls.Add(this.previewBox);
-            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
+            this.ClientSize = new System.Drawing.Size(889, 661);
+            this.Controls.Add(this.previewPanel);
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
+            this.Margin = new System.Windows.Forms.Padding(3);
+            this.MinimumSize = new System.Drawing.Size(480, 360);
             this.Name = "CameraShowForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
-            this.Text = "相机预览";
-            ((System.ComponentModel.ISupportInitialize)(this.previewBox)).EndInit();
+            this.Text = "相机实时预览";
+            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.CameraShowForm_FormClosing);
+            this.Shown += new System.EventHandler(this.CameraShowForm_Shown);
+            this.previewPanel.ResumeLayout(false);
             this.ResumeLayout(false);
-            this.PerformLayout();
         }
 
         #endregion
-
-        private System.Windows.Forms.PictureBox previewBox;
-        private System.Windows.Forms.Label titleLabel;
-        private System.Windows.Forms.Label statusLabel;
-        private System.Windows.Forms.Button captureButton;
-        private System.Windows.Forms.Button closeButton;
     }
 }
