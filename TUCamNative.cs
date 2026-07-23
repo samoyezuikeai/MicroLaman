@@ -74,6 +74,11 @@ namespace MicroLaman
     {
         internal const byte UsualFrameFormat = 0x11;
         internal const uint SequenceCaptureMode = 0x00;
+        internal const int ResolutionCapability = 0x00;
+        internal const int AutoExposureCapability = 0x03;
+        internal const int GlobalGainProperty = 0x00;
+        internal const int ExposureTimeProperty = 0x01;
+        internal const int DefaultDrawMode = 0x00;
 
         [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
         internal static extern TucamResult TUCAM_Api_Init(ref TucamInit init, int timeout);
@@ -86,6 +91,15 @@ namespace MicroLaman
 
         [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
         internal static extern TucamResult TUCAM_Dev_Close(IntPtr cameraHandle);
+
+        [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern TucamResult TUCAM_Capa_SetValue(IntPtr cameraHandle, int capabilityId, int value);
+
+        [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern TucamResult TUCAM_Prop_GetValue(IntPtr cameraHandle, int propertyId, ref double value, int channel);
+
+        [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern TucamResult TUCAM_Prop_SetValue(IntPtr cameraHandle, int propertyId, double value, int channel);
 
         [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
         internal static extern TucamResult TUCAM_Buf_Alloc(IntPtr cameraHandle, ref TucamFrame frame);
@@ -113,5 +127,10 @@ namespace MicroLaman
 
         [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
         internal static extern TucamResult TUCAM_Draw_Uninit(IntPtr cameraHandle);
+
+        [DllImport("TUCam.dll", CallingConvention = CallingConvention.Cdecl)]
+        internal static extern TucamResult TUCAM_Vendor_SetQueueMode(
+            IntPtr cameraHandle,
+            [MarshalAs(UnmanagedType.Bool)] bool queueMode);
     }
 }
