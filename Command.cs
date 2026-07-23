@@ -1,38 +1,64 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Globalization;
 
 namespace MicroLaman
 {
     class Command
     {
-        //得到当前位置
-        public string GetPosition()
+        public StagePosition ReadPosition()
         {
-            return SerialPortManager.SendAndReceive("?pos");
+            string response = SerialPortManager.SendAndReceive("?pos");
+            string[] values = SplitResponse(response, 3, "读取平台位置");
+            return new StagePosition
+            {
+                X = ParseNumber(values[0], "X 位置"),
+                Y = ParseNumber(values[1], "Y 位置"),
+                Z = ParseNumber(values[2], "Z 位置")
+            };
         }
 
-        //得到x y z的长度单位
-        public string GetDim()
+        public int[] ReadDimensions()
         {
-            return SerialPortManager.SendAndReceive("?dim");
+            string response = SerialPortManager.SendAndReceive("?dim");
+            string[] values = SplitResponse(response, 2, "读取平台坐标单位");
+            return new[]
+            {
+                (int)ParseNumber(values[0], "X 单位"),
+                (int)ParseNumber(values[1], "Y 单位")
+            };
         }
 
-        //相对移动
-        public string MoveRelative(double x, double y, double z)
+        public string MoveAbsoluteXY(double x, double y)
         {
-            string command = string.Format(CultureInfo.InvariantCulture, "mor {0} {1} {2}", x, y, z);
-            return SerialPortManager.SendAndReceive(command);
+            string command = string.Format(
+                CultureInfo.InvariantCulture,
+                "moa {0:R} {1:R}",
+                x,
+                y);
+            string response = SerialPortManager.SendAndReceive(command);
+            if (string.IsNullOrWhiteSpace(response))
+                throw new InvalidOperationException("平台移动没有返回完成状态。");
+            if (response.IndexOf('E') >= 0 || response.IndexOf('S') >= 0 || response.IndexOf('L') >= 0)
+                throw new InvalidOperationException("平台移动失败，TANGO 返回：" + response);
+            return response;
         }
 
-        //绝对移动
-        public string MoveAbsolute(double x, double y, double z)
+        private static string[] SplitResponse(string response, int minimumCount, string operation)
         {
-            string command = string.Format(CultureInfo.InvariantCulture, "moa {0} {1} {2}", x, y, z);
-            return SerialPortManager.SendAndReceive(command);
+            if (string.IsNullOrWhiteSpace(response))
+                throw new InvalidOperationException(operation + "失败：串口没有返回数据。");
+            string[] values = response.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (values.Length < minimumCount)
+                throw new InvalidOperationException(operation + "失败：返回格式不正确（" + response + "）。");
+            return values;
+        }
+
+        private static double ParseNumber(string text, string name)
+        {
+            double value;
+            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+                throw new InvalidOperationException(name + "不是有效数字：" + text);
+            return value;
         }
     }
 }

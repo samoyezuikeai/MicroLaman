@@ -1,0 +1,291 @@
+using System;
+using System.Numerics;
+
+namespace MicroLaman
+{
+    internal sealed class GrayFrameSnapshot
+    {
+        internal GrayFrameSnapshot(int width, int height, int originalWidth, int originalHeight, int samplingStep, byte[] pixels)
+        {
+            Width = width;
+            Height = height;
+            OriginalWidth = originalWidth;
+            OriginalHeight = originalHeight;
+            SamplingStep = samplingStep;
+            Pixels = pixels;
+        }
+
+        internal int Width { get; private set; }
+        internal int Height { get; private set; }
+        internal int OriginalWidth { get; private set; }
+        internal int OriginalHeight { get; private set; }
+        internal int SamplingStep { get; private set; }
+        internal byte[] Pixels { get; private set; }
+    }
+
+    internal struct ImageTranslation
+    {
+        internal double X;
+        internal double Y;
+        internal double Confidence;
+    }
+
+    internal sealed class PreparedImageRegistration
+    {
+        internal GrayFrameSnapshot Reference;
+        internal int FftWidth;
+        internal int FftHeight;
+        internal Complex[] ReferenceSpectrum;
+        internal Complex[] WorkSpectrum;
+        internal Complex[] Correlation;
+    }
+
+    internal static class ImageRegistration
+    {
+        internal static ImageTranslation MeasureTranslation(GrayFrameSnapshot reference, GrayFrameSnapshot moved)
+        {
+            return MeasureTranslation(Prepare(reference), moved, null, null, 0);
+        }
+
+        internal static ImageTranslation MeasureTranslation(PreparedImageRegistration prepared, GrayFrameSnapshot moved)
+        {
+            return MeasureTranslation(prepared, moved, null, null, 0);
+        }
+
+        internal static PreparedImageRegistration Prepare(GrayFrameSnapshot reference)
+        {
+            if (reference == null)
+                throw new ArgumentNullException("reference");
+
+            int fftWidth = NextPowerOfTwo(reference.Width);
+            int fftHeight = NextPowerOfTwo(reference.Height);
+            Complex[] spectrum = CreateWindowedImage(reference, fftWidth, fftHeight);
+            Transform2D(spectrum, fftWidth, fftHeight, false);
+            return new PreparedImageRegistration
+            {
+                Reference = reference,
+                FftWidth = fftWidth,
+                FftHeight = fftHeight,
+                ReferenceSpectrum = spectrum,
+                WorkSpectrum = new Complex[spectrum.Length],
+                Correlation = new Complex[spectrum.Length]
+            };
+        }
+
+        internal static ImageTranslation MeasureTranslationNear(
+            PreparedImageRegistration prepared,
+            GrayFrameSnapshot moved,
+            double expectedX,
+            double expectedY,
+            double searchRadius)
+        {
+            return MeasureTranslation(prepared, moved, expectedX, expectedY, searchRadius);
+        }
+
+        private static ImageTranslation MeasureTranslation(
+            PreparedImageRegistration prepared,
+            GrayFrameSnapshot moved,
+            double? expectedX,
+            double? expectedY,
+            double searchRadius)
+        {
+            if (prepared == null || moved == null)
+                throw new ArgumentNullException("校准图像不能为空。");
+            GrayFrameSnapshot reference = prepared.Reference;
+            if (reference.Width != moved.Width || reference.Height != moved.Height || reference.SamplingStep != moved.SamplingStep)
+                throw new InvalidOperationException("校准前后的相机分辨率不一致。");
+
+            int fftWidth = prepared.FftWidth;
+            int fftHeight = prepared.FftHeight;
+            Complex[] second = prepared.WorkSpectrum;
+            FillWindowedImage(moved, fftWidth, fftHeight, second);
+            Transform2D(second, fftWidth, fftHeight, false);
+
+            Complex[] correlation = prepared.Correlation;
+            for (int i = 0; i < correlation.Length; i++)
+            {
+                Complex value = Complex.Conjugate(prepared.ReferenceSpectrum[i]) * second[i];
+                double magnitude = value.Magnitude;
+                correlation[i] = magnitude > 1e-12 ? value / magnitude : Complex.Zero;
+            }
+
+            Transform2D(correlation, fftWidth, fftHeight, true);
+            int peakX = 0;
+            int peakY = 0;
+            double peak = double.MinValue;
+            double absoluteSum = 0;
+            int candidateCount = 0;
+            double expectedSampleX = expectedX.GetValueOrDefault() / reference.SamplingStep;
+            double expectedSampleY = expectedY.GetValueOrDefault() / reference.SamplingStep;
+            double radiusSamples = searchRadius / reference.SamplingStep;
+            for (int y = 0; y < fftHeight; y++)
+            {
+                int shiftY = y <= fftHeight / 2 ? y : y - fftHeight;
+                for (int x = 0; x < fftWidth; x++)
+                {
+                    int shiftX = x <= fftWidth / 2 ? x : x - fftWidth;
+                    if (expectedX.HasValue
+                        && (Math.Abs(shiftX - expectedSampleX) > radiusSamples
+                            || Math.Abs(shiftY - expectedSampleY) > radiusSamples))
+                        continue;
+
+                    double value = correlation[y * fftWidth + x].Real;
+                    absoluteSum += Math.Abs(value);
+                    candidateCount++;
+                    if (value > peak)
+                    {
+                        peak = value;
+                        peakX = x;
+                        peakY = y;
+                    }
+                }
+            }
+
+            if (candidateCount == 0 || peak == double.MinValue)
+                throw new InvalidOperationException("期望范围内没有找到有效的图像位移峰值。");
+
+            double subpixelX = peakX + ParabolicOffset(
+                GetWrapped(correlation, fftWidth, fftHeight, peakX - 1, peakY),
+                peak,
+                GetWrapped(correlation, fftWidth, fftHeight, peakX + 1, peakY));
+            double subpixelY = peakY + ParabolicOffset(
+                GetWrapped(correlation, fftWidth, fftHeight, peakX, peakY - 1),
+                peak,
+                GetWrapped(correlation, fftWidth, fftHeight, peakX, peakY + 1));
+
+            if (subpixelX > fftWidth / 2.0)
+                subpixelX -= fftWidth;
+            if (subpixelY > fftHeight / 2.0)
+                subpixelY -= fftHeight;
+
+            double meanAbsolute = absoluteSum / candidateCount;
+            return new ImageTranslation
+            {
+                X = subpixelX * reference.SamplingStep,
+                Y = subpixelY * reference.SamplingStep,
+                Confidence = meanAbsolute > 1e-12 ? peak / meanAbsolute : 0
+            };
+        }
+
+        private static Complex[] CreateWindowedImage(GrayFrameSnapshot frame, int fftWidth, int fftHeight)
+        {
+            Complex[] result = new Complex[fftWidth * fftHeight];
+            FillWindowedImage(frame, fftWidth, fftHeight, result);
+            return result;
+        }
+
+        private static void FillWindowedImage(
+            GrayFrameSnapshot frame,
+            int fftWidth,
+            int fftHeight,
+            Complex[] result)
+        {
+            Array.Clear(result, 0, result.Length);
+            double mean = 0;
+            for (int i = 0; i < frame.Pixels.Length; i++)
+                mean += frame.Pixels[i];
+            mean /= Math.Max(1, frame.Pixels.Length);
+
+            for (int y = 0; y < frame.Height; y++)
+            {
+                double windowY = frame.Height > 1
+                    ? 0.5 - 0.5 * Math.Cos(2 * Math.PI * y / (frame.Height - 1))
+                    : 1;
+                for (int x = 0; x < frame.Width; x++)
+                {
+                    double windowX = frame.Width > 1
+                        ? 0.5 - 0.5 * Math.Cos(2 * Math.PI * x / (frame.Width - 1))
+                        : 1;
+                    result[y * fftWidth + x] = (frame.Pixels[y * frame.Width + x] - mean) * windowX * windowY;
+                }
+            }
+        }
+
+        private static double GetWrapped(Complex[] values, int width, int height, int x, int y)
+        {
+            x = (x + width) % width;
+            y = (y + height) % height;
+            return values[y * width + x].Real;
+        }
+
+        private static double ParabolicOffset(double before, double center, double after)
+        {
+            double denominator = before - 2 * center + after;
+            if (Math.Abs(denominator) < 1e-12)
+                return 0;
+            return Math.Max(-0.5, Math.Min(0.5, 0.5 * (before - after) / denominator));
+        }
+
+        private static int NextPowerOfTwo(int value)
+        {
+            int result = 1;
+            while (result < value)
+                result <<= 1;
+            return result;
+        }
+
+        private static void Transform2D(Complex[] values, int width, int height, bool inverse)
+        {
+            Complex[] row = new Complex[width];
+            for (int y = 0; y < height; y++)
+            {
+                Array.Copy(values, y * width, row, 0, width);
+                Transform(row, inverse);
+                Array.Copy(row, 0, values, y * width, width);
+            }
+
+            Complex[] column = new Complex[height];
+            for (int x = 0; x < width; x++)
+            {
+                for (int y = 0; y < height; y++)
+                    column[y] = values[y * width + x];
+                Transform(column, inverse);
+                for (int y = 0; y < height; y++)
+                    values[y * width + x] = column[y];
+            }
+        }
+
+        private static void Transform(Complex[] values, bool inverse)
+        {
+            int length = values.Length;
+            for (int i = 1, j = 0; i < length; i++)
+            {
+                int bit = length >> 1;
+                for (; (j & bit) != 0; bit >>= 1)
+                    j ^= bit;
+                j ^= bit;
+                if (i < j)
+                {
+                    Complex temporary = values[i];
+                    values[i] = values[j];
+                    values[j] = temporary;
+                }
+            }
+
+            for (int block = 2; block <= length; block <<= 1)
+            {
+                double angle = 2 * Math.PI / block * (inverse ? 1 : -1);
+                Complex root = new Complex(Math.Cos(angle), Math.Sin(angle));
+                for (int start = 0; start < length; start += block)
+                {
+                    Complex factor = Complex.One;
+                    int half = block >> 1;
+                    for (int offset = 0; offset < half; offset++)
+                    {
+                        Complex even = values[start + offset];
+                        Complex odd = values[start + offset + half] * factor;
+                        values[start + offset] = even + odd;
+                        values[start + offset + half] = even - odd;
+                        factor *= root;
+                    }
+                }
+            }
+
+            if (inverse)
+            {
+                for (int i = 0; i < length; i++)
+                    values[i] /= length;
+            }
+        }
+    }
+}
