@@ -62,7 +62,7 @@ namespace MicroLaman
             this.controlPanel.Controls.Add(this.performanceLabel);
             this.controlPanel.Dock = System.Windows.Forms.DockStyle.Top;
             this.controlPanel.Location = new System.Drawing.Point(0, 0);
-            this.controlPanel.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.controlPanel.Margin = new System.Windows.Forms.Padding(6);
             this.controlPanel.Name = "controlPanel";
             this.controlPanel.Size = new System.Drawing.Size(1960, 92);
             this.controlPanel.TabIndex = 0;
@@ -87,7 +87,7 @@ namespace MicroLaman
             "均衡 2736×1824",
             "高速 1824×1216"});
             this.resolutionComboBox.Location = new System.Drawing.Point(114, 24);
-            this.resolutionComboBox.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.resolutionComboBox.Margin = new System.Windows.Forms.Padding(6);
             this.resolutionComboBox.Name = "resolutionComboBox";
             this.resolutionComboBox.Size = new System.Drawing.Size(266, 32);
             this.resolutionComboBox.TabIndex = 1;
@@ -112,7 +112,7 @@ namespace MicroLaman
             0,
             65536});
             this.exposureNumeric.Location = new System.Drawing.Point(534, 24);
-            this.exposureNumeric.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.exposureNumeric.Margin = new System.Windows.Forms.Padding(6);
             this.exposureNumeric.Maximum = new decimal(new int[] {
             1000,
             0,
@@ -146,7 +146,7 @@ namespace MicroLaman
             // gainNumeric
             // 
             this.gainNumeric.Location = new System.Drawing.Point(764, 24);
-            this.gainNumeric.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.gainNumeric.Margin = new System.Windows.Forms.Padding(6);
             this.gainNumeric.Maximum = new decimal(new int[] {
             240,
             0,
@@ -168,9 +168,9 @@ namespace MicroLaman
             this.autoExposureCheckBox.CheckState = System.Windows.Forms.CheckState.Checked;
             this.autoExposureCheckBox.ForeColor = System.Drawing.Color.Gainsboro;
             this.autoExposureCheckBox.Location = new System.Drawing.Point(890, 30);
-            this.autoExposureCheckBox.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.autoExposureCheckBox.Margin = new System.Windows.Forms.Padding(6);
             this.autoExposureCheckBox.Name = "autoExposureCheckBox";
-            this.autoExposureCheckBox.Size = new System.Drawing.Size(144, 28);
+            this.autoExposureCheckBox.Size = new System.Drawing.Size(138, 28);
             this.autoExposureCheckBox.TabIndex = 6;
             this.autoExposureCheckBox.Text = "自动曝光";
             this.autoExposureCheckBox.UseVisualStyleBackColor = true;
@@ -179,7 +179,7 @@ namespace MicroLaman
             // applySettingsButton
             // 
             this.applySettingsButton.Location = new System.Drawing.Point(1054, 20);
-            this.applySettingsButton.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.applySettingsButton.Margin = new System.Windows.Forms.Padding(6);
             this.applySettingsButton.Name = "applySettingsButton";
             this.applySettingsButton.Size = new System.Drawing.Size(140, 50);
             this.applySettingsButton.TabIndex = 7;
@@ -190,7 +190,7 @@ namespace MicroLaman
             // zoomButton
             // 
             this.zoomButton.Location = new System.Drawing.Point(1210, 20);
-            this.zoomButton.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.zoomButton.Margin = new System.Windows.Forms.Padding(6);
             this.zoomButton.Name = "zoomButton";
             this.zoomButton.Size = new System.Drawing.Size(164, 50);
             this.zoomButton.TabIndex = 8;
@@ -216,7 +216,7 @@ namespace MicroLaman
             this.previewPanel.Controls.Add(this.statusLabel);
             this.previewPanel.Dock = System.Windows.Forms.DockStyle.Fill;
             this.previewPanel.Location = new System.Drawing.Point(0, 92);
-            this.previewPanel.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.previewPanel.Margin = new System.Windows.Forms.Padding(6);
             this.previewPanel.Name = "previewPanel";
             this.previewPanel.Size = new System.Drawing.Size(1960, 1308);
             this.previewPanel.TabIndex = 1;
@@ -244,7 +244,7 @@ namespace MicroLaman
             this.ClientSize = new System.Drawing.Size(1960, 1400);
             this.Controls.Add(this.previewPanel);
             this.Controls.Add(this.controlPanel);
-            this.Margin = new System.Windows.Forms.Padding(6, 6, 6, 6);
+            this.Margin = new System.Windows.Forms.Padding(6);
             this.MinimumSize = new System.Drawing.Size(1534, 929);
             this.Name = "CameraShowForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
