@@ -3,11 +3,23 @@ using System.Globalization;
 
 namespace MicroLaman
 {
-    class Command
+    /// <summary>
+    /// 封装扫描平台使用到的 TANGO 文本指令及返回值解析。
+    /// </summary>
+    internal sealed class Command
     {
+        private const int QueryTimeoutMilliseconds = 3000;
+        private const int QueryAttemptCount = 3;
+
+        /// <summary>
+        /// 读取平台当前 X、Y、Z 坐标。
+        /// </summary>
         public StagePosition ReadPosition()
         {
-            string response = SerialPortManager.SendAndReceive("?pos");
+            string response = SerialPortManager.SendAndReceive(
+                "?pos",
+                QueryTimeoutMilliseconds,
+                QueryAttemptCount);
             string[] values = SplitResponse(response, 3, "读取平台位置");
             return new StagePosition
             {
@@ -17,9 +29,15 @@ namespace MicroLaman
             };
         }
 
+        /// <summary>
+        /// 读取 X、Y 轴的单位代码，用于换算标定距离和容差。
+        /// </summary>
         public int[] ReadDimensions()
         {
-            string response = SerialPortManager.SendAndReceive("?dim");
+            string response = SerialPortManager.SendAndReceive(
+                "?dim",
+                QueryTimeoutMilliseconds,
+                QueryAttemptCount);
             string[] values = SplitResponse(response, 2, "读取平台坐标单位");
             return new[]
             {
@@ -28,7 +46,10 @@ namespace MicroLaman
             };
         }
 
-        public string MoveAbsoluteXY(double x, double y)
+        /// <summary>
+        /// 以绝对坐标移动 X、Y 轴；Z 轴保持不变。
+        /// </summary>
+        public void MoveAbsoluteXY(double x, double y)
         {
             string command = string.Format(
                 CultureInfo.InvariantCulture,
@@ -40,9 +61,11 @@ namespace MicroLaman
                 throw new InvalidOperationException("平台移动没有返回完成状态。");
             if (response.IndexOf('E') >= 0 || response.IndexOf('S') >= 0 || response.IndexOf('L') >= 0)
                 throw new InvalidOperationException("平台移动失败，TANGO 返回：" + response);
-            return response;
         }
 
+        /// <summary>
+        /// 将控制器返回文本拆分成至少指定数量的字段。
+        /// </summary>
         private static string[] SplitResponse(string response, int minimumCount, string operation)
         {
             if (string.IsNullOrWhiteSpace(response))
@@ -53,6 +76,9 @@ namespace MicroLaman
             return values;
         }
 
+        /// <summary>
+        /// 按控制器固定使用的小数点格式解析数值。
+        /// </summary>
         private static double ParseNumber(string text, string name)
         {
             double value;

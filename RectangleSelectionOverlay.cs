@@ -4,6 +4,9 @@ using System.Drawing;
 
 namespace MicroLaman
 {
+    /// <summary>
+    /// 保存并绘制与相机帧合成的框选区域、扫描网格和已访问点。
+    /// </summary>
     internal sealed class RectangleSelectionOverlay
     {
         private readonly object stateSync = new object();
@@ -12,17 +15,26 @@ namespace MicroLaman
         private int yPointCount = 3;
         private readonly List<PointF> recordedScanPoints = new List<PointF>();
 
+        /// <summary>
+        /// 更新预览控件归一化坐标中的框选区域。
+        /// </summary>
         internal void SetSelection(RectangleF selection)
         {
             lock (stateSync)
                 normalizedSelection = selection;
         }
 
+        /// <summary>
+        /// 清除当前框选区域。
+        /// </summary>
         internal void ClearSelection()
         {
             SetSelection(RectangleF.Empty);
         }
 
+        /// <summary>
+        /// 设置网格在 X、Y 方向上的点数。
+        /// </summary>
         internal void SetGridSize(int xCount, int yCount)
         {
             lock (stateSync)
@@ -32,6 +44,9 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>
+        /// 用归一化预览坐标更新扫描过程中记录的红点。
+        /// </summary>
         internal void SetRecordedScanPoints(IEnumerable<PointF> points)
         {
             lock (stateSync)
@@ -42,6 +57,9 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>
+        /// 将全部标注直接绘制到当前相机预览帧表面。
+        /// </summary>
         internal void Draw(Graphics graphics, Size clientSize)
         {
             RectangleF selection;
@@ -83,6 +101,9 @@ namespace MicroLaman
             DrawRecordedScanPoints(graphics, clientSize, recordedPoints);
         }
 
+        /// <summary>
+        /// 绘制黄色目标网格点。
+        /// </summary>
         private static void DrawScanPoints(Graphics graphics, Rectangle rectangle, int xCount, int yCount)
         {
             const int radius = 3;
@@ -108,6 +129,9 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>
+        /// 绘制扫描后记录的红色实际到达点。
+        /// </summary>
         private static void DrawRecordedScanPoints(Graphics graphics, Size clientSize, IList<PointF> points)
         {
             if (points.Count == 0)

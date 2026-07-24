@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace MicroLaman.Properties {
+namespace MicroRaman.Properties {
     
     
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]

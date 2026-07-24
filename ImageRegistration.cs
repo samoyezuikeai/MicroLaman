@@ -3,8 +3,14 @@ using System.Numerics;
 
 namespace MicroLaman
 {
+    /// <summary>
+    /// 用于图像配准的降采样灰度帧。
+    /// </summary>
     internal sealed class GrayFrameSnapshot
     {
+        /// <summary>
+        /// 创建灰度帧并保留其与原始相机像素之间的比例。
+        /// </summary>
         internal GrayFrameSnapshot(int width, int height, int originalWidth, int originalHeight, int samplingStep, byte[] pixels)
         {
             Width = width;
@@ -23,6 +29,9 @@ namespace MicroLaman
         internal byte[] Pixels { get; private set; }
     }
 
+    /// <summary>
+    /// 图像相对参考帧的 X/Y 位移及相关峰可信度。
+    /// </summary>
     internal struct ImageTranslation
     {
         internal double X;
@@ -30,6 +39,9 @@ namespace MicroLaman
         internal double Confidence;
     }
 
+    /// <summary>
+    /// 缓存参考帧频谱和可复用工作区，避免逐帧大量分配内存。
+    /// </summary>
     internal sealed class PreparedImageRegistration
     {
         internal GrayFrameSnapshot Reference;
@@ -40,19 +52,23 @@ namespace MicroLaman
         internal Complex[] Correlation;
     }
 
+    /// <summary>
+    /// 使用相位相关计算两帧图像之间的亚像素平移。
+    /// </summary>
     internal static class ImageRegistration
     {
+        /// <summary>
+        /// 一次性准备参考帧并测量目标帧位移。
+        /// </summary>
         internal static ImageTranslation MeasureTranslation(GrayFrameSnapshot reference, GrayFrameSnapshot moved)
         {
-            return MeasureTranslation(Prepare(reference), moved, null, null, 0);
+            return MeasureTranslation(Prepare(reference), moved);
         }
 
-        internal static ImageTranslation MeasureTranslation(PreparedImageRegistration prepared, GrayFrameSnapshot moved)
-        {
-            return MeasureTranslation(prepared, moved, null, null, 0);
-        }
-
-        internal static PreparedImageRegistration Prepare(GrayFrameSnapshot reference)
+        /// <summary>
+        /// 预计算参考帧频谱及后续测量所需工作缓冲。
+        /// </summary>
+        private static PreparedImageRegistration Prepare(GrayFrameSnapshot reference)
         {
             if (reference == null)
                 throw new ArgumentNullException("reference");
@@ -72,22 +88,12 @@ namespace MicroLaman
             };
         }
 
-        internal static ImageTranslation MeasureTranslationNear(
-            PreparedImageRegistration prepared,
-            GrayFrameSnapshot moved,
-            double expectedX,
-            double expectedY,
-            double searchRadius)
-        {
-            return MeasureTranslation(prepared, moved, expectedX, expectedY, searchRadius);
-        }
-
+        /// <summary>
+        /// 执行相位相关、峰值搜索和抛物线亚像素拟合。
+        /// </summary>
         private static ImageTranslation MeasureTranslation(
             PreparedImageRegistration prepared,
-            GrayFrameSnapshot moved,
-            double? expectedX,
-            double? expectedY,
-            double searchRadius)
+            GrayFrameSnapshot moved)
         {
             if (prepared == null || moved == null)
                 throw new ArgumentNullException("校准图像不能为空。");
@@ -114,24 +120,12 @@ namespace MicroLaman
             int peakY = 0;
             double peak = double.MinValue;
             double absoluteSum = 0;
-            int candidateCount = 0;
-            double expectedSampleX = expectedX.GetValueOrDefault() / reference.SamplingStep;
-            double expectedSampleY = expectedY.GetValueOrDefault() / reference.SamplingStep;
-            double radiusSamples = searchRadius / reference.SamplingStep;
             for (int y = 0; y < fftHeight; y++)
             {
-                int shiftY = y <= fftHeight / 2 ? y : y - fftHeight;
                 for (int x = 0; x < fftWidth; x++)
                 {
-                    int shiftX = x <= fftWidth / 2 ? x : x - fftWidth;
-                    if (expectedX.HasValue
-                        && (Math.Abs(shiftX - expectedSampleX) > radiusSamples
-                            || Math.Abs(shiftY - expectedSampleY) > radiusSamples))
-                        continue;
-
                     double value = correlation[y * fftWidth + x].Real;
                     absoluteSum += Math.Abs(value);
-                    candidateCount++;
                     if (value > peak)
                     {
                         peak = value;
@@ -141,8 +135,8 @@ namespace MicroLaman
                 }
             }
 
-            if (candidateCount == 0 || peak == double.MinValue)
-                throw new InvalidOperationException("期望范围内没有找到有效的图像位移峰值。");
+            if (peak == double.MinValue)
+                throw new InvalidOperationException("没有找到有效的图像位移峰值。");
 
             double subpixelX = peakX + ParabolicOffset(
                 GetWrapped(correlation, fftWidth, fftHeight, peakX - 1, peakY),
@@ -158,7 +152,7 @@ namespace MicroLaman
             if (subpixelY > fftHeight / 2.0)
                 subpixelY -= fftHeight;
 
-            double meanAbsolute = absoluteSum / candidateCount;
+            double meanAbsolute = absoluteSum / (fftWidth * fftHeight);
             return new ImageTranslation
             {
                 X = subpixelX * reference.SamplingStep,
@@ -167,6 +161,9 @@ namespace MicroLaman
             };
         }
 
+        /// <summary>
+        /// 创建经过均值去除和汉宁窗处理的复数图像。
+        /// </summary>
         private static Complex[] CreateWindowedImage(GrayFrameSnapshot frame, int fftWidth, int fftHeight)
         {
             Complex[] result = new Complex[fftWidth * fftHeight];
@@ -174,6 +171,9 @@ namespace MicroLaman
             return result;
         }
 
+        /// <summary>
+        /// 将灰度帧填入可复用 FFT 缓冲区并应用二维汉宁窗。
+        /// </summary>
         private static void FillWindowedImage(
             GrayFrameSnapshot frame,
             int fftWidth,
@@ -201,6 +201,9 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>
+        /// 以环绕坐标读取相关平面数值。
+        /// </summary>
         private static double GetWrapped(Complex[] values, int width, int height, int x, int y)
         {
             x = (x + width) % width;
@@ -208,6 +211,9 @@ namespace MicroLaman
             return values[y * width + x].Real;
         }
 
+        /// <summary>
+        /// 使用峰值左右样本计算限制在半像素内的亚像素偏移。
+        /// </summary>
         private static double ParabolicOffset(double before, double center, double after)
         {
             double denominator = before - 2 * center + after;
@@ -216,6 +222,9 @@ namespace MicroLaman
             return Math.Max(-0.5, Math.Min(0.5, 0.5 * (before - after) / denominator));
         }
 
+        /// <summary>
+        /// 返回不小于输入值的最小 2 次幂。
+        /// </summary>
         private static int NextPowerOfTwo(int value)
         {
             int result = 1;
@@ -224,6 +233,9 @@ namespace MicroLaman
             return result;
         }
 
+        /// <summary>
+        /// 分别对所有行和列执行一维 FFT，完成二维变换。
+        /// </summary>
         private static void Transform2D(Complex[] values, int width, int height, bool inverse)
         {
             Complex[] row = new Complex[width];
@@ -245,6 +257,9 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>
+        /// 原地执行 radix-2 Cooley-Tukey 快速傅里叶变换。
+        /// </summary>
         private static void Transform(Complex[] values, bool inverse)
         {
             int length = values.Length;

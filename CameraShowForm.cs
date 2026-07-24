@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -8,17 +8,21 @@ using System.Windows.Forms;
 
 namespace MicroLaman
 {
+    /// <summary>
+    /// 相机实时预览窗口，负责 TUCam 采集、参数控制、框选绘制和定标快照。
+    /// </summary>
     public partial class CameraShowForm : Form
     {
         private TucamOpen camera;
         private TucamFrame frame;
         private Thread captureThread;
         private System.Windows.Forms.Timer performanceTimer;
+        private readonly Command stagePositionCommand = new Command();
+        private int stagePositionQueryPending;
         private readonly Stopwatch frameRateWatch = new Stopwatch();
         private readonly object frameArrivalSync = new object();
         private readonly object snapshotCaptureSync = new object();
         private readonly object snapshotStateSync = new object();
-        private readonly object liveTrackingSync = new object();
         private readonly object overlayModelSync = new object();
         private readonly AutoResetEvent snapshotReady = new AutoResetEvent(false);
         private readonly object previewDrawSync = new object();
@@ -47,23 +51,25 @@ namespace MicroLaman
         private GrayFrameSnapshot snapshotResult;
         private Exception snapshotException;
         private byte[] snapshotRawBuffer;
-        private PreparedImageRegistration liveTrackingRegistration;
-        private bool liveTrackingEnabled;
-        private bool stageTrackingEnabled;
-        private StagePosition trackingOrigin;
-        private StagePixelCalibration trackingCalibration;
         private readonly List<PointF> recordedScanPointsImage = new List<PointF>();
 
         internal int CameraImageWidth { get { return imageWidth; } }
         internal int CameraImageHeight { get { return imageHeight; } }
 
+        /// <summary>初始化相机窗口及默认曝光状态。</summary>
         public CameraShowForm()
         {
             InitializeComponent();
+            rectangleToolButton.Image = CreateSelectionToolIcon();
+            // 默认占当前屏幕工作区的 80%，保持普通可缩放窗口。
+            Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+            Size = new Size((int)(workingArea.Width * 0.80), (int)(workingArea.Height * 0.80));
+            StartPosition = FormStartPosition.CenterScreen;
             resolutionComboBox.SelectedIndex = 1;
             AutoExposureCheckBox_CheckedChanged(null, EventArgs.Empty);
         }
 
+        /// <summary>窗口首次显示后创建帧内标注绘制器并启动相机。</summary>
         private void CameraShowForm_Shown(object sender, EventArgs e)
         {
             previewWidth = previewPanel.ClientSize.Width;
@@ -78,6 +84,7 @@ namespace MicroLaman
             StartCamera();
         }
 
+        /// <summary>初始化 SDK、打开设备、配置采集并启动后台采集线程。</summary>
         private void StartCamera()
         {
             IntPtr configPath = IntPtr.Zero;
@@ -143,6 +150,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>将分辨率、曝光方式、曝光时间和增益写入相机。</summary>
         private void ApplyFocusSettings()
         {
             int resolution = Math.Max(0, resolutionComboBox.SelectedIndex);
@@ -171,6 +179,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>持续接收相机帧并完成快照、显示和标注合成。</summary>
         private void CaptureLoop()
         {
             IntPtr framePointer = IntPtr.Zero;
@@ -193,7 +202,6 @@ namespace MicroLaman
                     lock (frameArrivalSync)
                         Monitor.PulseAll(frameArrivalSync);
                     FulfillSnapshotRequest();
-                    UpdateLiveOverlayTracking();
 
                     if (!drawInitialized)
                     {
@@ -220,6 +228,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>使用预览窗口句柄初始化 TUCam 原生绘制器。</summary>
         private void InitializeNativeDrawing()
         {
             TucamDrawInit drawInit = new TucamDrawInit
@@ -235,6 +244,7 @@ namespace MicroLaman
             drawInitialized = true;
         }
 
+        /// <summary>绘制当前帧，并立即在同一显示表面叠加扫描标注。</summary>
         private void DrawFrameWithRecovery(IntPtr framePointer)
         {
             TucamDraw draw = CreateDrawRectangle(framePointer, frame.Width, frame.Height);
@@ -255,6 +265,7 @@ namespace MicroLaman
             EnsureSuccess(result, "显示相机图像");
         }
 
+        /// <summary>根据当前窗口尺寸构造 SDK 帧绘制参数。</summary>
         private TucamDraw CreateDrawRectangle(IntPtr framePointer, int frameWidth, int frameHeight)
         {
             Rectangle source;
@@ -274,6 +285,7 @@ namespace MicroLaman
             };
         }
 
+        /// <summary>计算保持宽高比的相机源区域和预览目标区域。</summary>
         private void GetCameraViewRectangles(int frameWidth, int frameHeight, out Rectangle source, out Rectangle destination)
         {
             int targetWidth = Math.Max(4, previewWidth);
@@ -290,17 +302,20 @@ namespace MicroLaman
                 height);
         }
 
+        /// <summary>将显示尺寸向下对齐到 4 像素边界。</summary>
         private static int AlignToFour(int value)
         {
             return Math.Max(4, (value / 4) * 4);
         }
 
+        /// <summary>检查 SDK 返回码，并在失败时抛出带操作名的异常。</summary>
         private static void EnsureSuccess(TucamResult result, string operation)
         {
             if (result != TucamResult.Success)
                 throw new InvalidOperationException(string.Format("{0}失败（TUCAM 返回码 0x{1:X8}）。", operation, (uint)result));
         }
 
+        /// <summary>定时刷新 FPS、分辨率和自动曝光后的实时参数。</summary>
         private void PerformanceTimer_Tick(object sender, EventArgs e)
         {
             long elapsed = Math.Max(1, frameRateWatch.ElapsedMilliseconds);
@@ -315,8 +330,46 @@ namespace MicroLaman
 
             if (autoExposureCheckBox.Checked && camera.CameraHandle != IntPtr.Zero)
                 UpdateAutomaticExposureValues();
+
+            QueueStagePositionUpdate();
         }
 
+        /// <summary>在后台线程中使用与扫描相同的 ?pos 指令持续刷新平台坐标。</summary>
+        private void QueueStagePositionUpdate()
+        {
+            if (Interlocked.CompareExchange(ref stagePositionQueryPending, 1, 0) != 0)
+                return;
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    StagePosition position = stagePositionCommand.ReadPosition();
+
+                    RunOnUiThread(delegate
+                    {
+                        stagePositionLabel.Text = string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "平台坐标\r\nX: {0:F4} mm\r\nY: {1:F4} mm\r\nZ: {2:F4} mm",
+                            position.X,
+                            position.Y,
+                            position.Z);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    RunOnUiThread(delegate
+                    {
+                        stagePositionLabel.Text = "平台坐标\r\n读取失败\r\n" + ex.Message;
+                    });
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref stagePositionQueryPending, 0);
+                }
+            });
+        }
+        /// <summary>读取自动曝光当前计算出的曝光时间和增益。</summary>
         private void UpdateAutomaticExposureValues()
         {
             double exposure = 0;
@@ -327,11 +380,13 @@ namespace MicroLaman
                 gainNumeric.Value = ClampDecimal((decimal)gain, gainNumeric.Minimum, gainNumeric.Maximum);
         }
 
+        /// <summary>将数值限制到控件允许的范围。</summary>
         private static decimal ClampDecimal(decimal value, decimal minimum, decimal maximum)
         {
             return Math.Min(maximum, Math.Max(minimum, value));
         }
 
+        /// <summary>自动曝光开关变化时同步手动参数控件状态。</summary>
         private void AutoExposureCheckBox_CheckedChanged(object sender, EventArgs e)
         {
             bool manual = !autoExposureCheckBox.Checked;
@@ -339,6 +394,7 @@ namespace MicroLaman
             gainNumeric.Enabled = manual;
         }
 
+        /// <summary>重新启动采集以应用当前相机参数。</summary>
         private void ApplySettingsButton_Click(object sender, EventArgs e)
         {
             applySettingsButton.Enabled = false;
@@ -353,6 +409,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>切换矩形框选模式及鼠标样式。</summary>
         private void RectangleToolButton_Click(object sender, EventArgs e)
         {
             rectangleToolEnabled = !rectangleToolEnabled;
@@ -369,25 +426,35 @@ namespace MicroLaman
             rectangleToolButton.Invalidate();
         }
 
-        private void RectangleToolButton_Paint(object sender, PaintEventArgs e)
+        /// <summary>创建与截图工具一致的虚线选区和蓝色控制点图标。</summary>
+        private static Bitmap CreateSelectionToolIcon()
         {
-            Color color = rectangleToolEnabled ? Color.DeepSkyBlue : Color.DarkGray;
-            using (Pen pen = new Pen(color, 1.6f))
+            Bitmap icon = new Bitmap(24, 24);
+            using (Graphics graphics = Graphics.FromImage(icon))
+            using (Pen selectionPen = new Pen(Color.OrangeRed, 2F))
+            using (Pen handlePen = new Pen(Color.DeepSkyBlue, 1.5F))
+            using (Brush handleBrush = new SolidBrush(Color.White))
             {
-                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                e.Graphics.DrawLine(pen, 10, 7, 22, 7);
-                e.Graphics.DrawLine(pen, 10, 7, 10, 18);
-                e.Graphics.DrawLine(pen, 16, 5, 16, 20);
-                e.Graphics.DrawLine(pen, 16, 20, 28, 20);
-                e.Graphics.DrawLine(pen, 28, 13, 28, 22);
-            }
-        }
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                selectionPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                graphics.DrawRectangle(selectionPen, 2, 2, 15, 15);
 
+                Rectangle rightHandle = new Rectangle(15, 8, 6, 6);
+                Rectangle bottomHandle = new Rectangle(8, 15, 6, 6);
+                graphics.FillEllipse(handleBrush, rightHandle);
+                graphics.DrawEllipse(handlePen, rightHandle);
+                graphics.FillEllipse(handleBrush, bottomHandle);
+                graphics.DrawEllipse(handlePen, bottomHandle);
+            }
+            return icon;
+        }
+        /// <summary>X/Y 点数变化时立即更新预览网格。</summary>
         private void ScanPointCount_ValueChanged(object sender, EventArgs e)
         {
             UpdateOverlayGridSize();
         }
 
+        /// <summary>将当前 X/Y 点数写入标注绘制器。</summary>
         private void UpdateOverlayGridSize()
         {
             if (selectionOverlay == null)
@@ -396,6 +463,7 @@ namespace MicroLaman
             selectionOverlay.SetGridSize((int)xPointCountNumeric.Value, (int)yPointCountNumeric.Value);
         }
 
+        /// <summary>开始新的矩形拖拽，并清除上一轮扫描标记。</summary>
         private void PreviewPanel_MouseDown(object sender, MouseEventArgs e)
         {
             if (!rectangleToolEnabled || e.Button != MouseButtons.Left)
@@ -407,7 +475,6 @@ namespace MicroLaman
                 return;
 
             CancelRectangleDrawing();
-            stageTrackingEnabled = false;
             recordedScanPointsImage.Clear();
             selectionImageRegion = RectangleF.Empty;
             displayedSelectionImageRegion = RectangleF.Empty;
@@ -418,6 +485,7 @@ namespace MicroLaman
             previewPanel.Capture = true;
         }
 
+        /// <summary>拖拽过程中实时更新临时矩形。</summary>
         private void PreviewPanel_MouseMove(object sender, MouseEventArgs e)
         {
             if (!drawingRectangle)
@@ -432,6 +500,7 @@ namespace MicroLaman
             ShowOverlayClientRectangle(rectangle);
         }
 
+        /// <summary>结束拖拽，将有效矩形保存为归一化图像区域。</summary>
         private void PreviewPanel_MouseUp(object sender, MouseEventArgs e)
         {
             if (!drawingRectangle || e.Button != MouseButtons.Left)
@@ -463,6 +532,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>取消尚未完成的矩形拖拽。</summary>
         private void CancelRectangleDrawing()
         {
             if (!drawingRectangle)
@@ -476,6 +546,7 @@ namespace MicroLaman
                 selectionOverlay.ClearSelection();
         }
 
+        /// <summary>把预览控件像素矩形转换成绘制器使用的归一化矩形。</summary>
         private void ShowOverlayClientRectangle(Rectangle rectangle)
         {
             int clientWidth = previewWidth;
@@ -496,6 +567,7 @@ namespace MicroLaman
                 (float)rectangle.Height / clientHeight));
         }
 
+        /// <summary>获取当前有效的相机源区域和预览目标区域。</summary>
         private bool TryGetCameraViewRectangles(out Rectangle source, out Rectangle destination)
         {
             if (imageWidth <= 0 || imageHeight <= 0)
@@ -509,6 +581,7 @@ namespace MicroLaman
             return source.Width > 0 && source.Height > 0 && destination.Width > 0 && destination.Height > 0;
         }
 
+        /// <summary>将预览控件中的矩形换算为归一化相机图像区域。</summary>
         private RectangleF ClientToImageRegion(Rectangle rectangle, Rectangle source, Rectangle destination)
         {
             float left = source.Left + (rectangle.Left - destination.Left) * (float)source.Width / destination.Width;
@@ -522,6 +595,7 @@ namespace MicroLaman
                 bottom / imageHeight);
         }
 
+        /// <summary>按当前图像位移和窗口缩放更新框线及红点显示位置。</summary>
         private void UpdateSelectionOverlayFromImageCoordinates()
         {
             lock (overlayModelSync)
@@ -556,6 +630,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>将记录在原始图像坐标中的红点转换为当前预览坐标。</summary>
         private void UpdateRecordedScanPointsOverlay(Rectangle source, Rectangle destination)
         {
             int clientWidth = previewWidth;
@@ -579,6 +654,7 @@ namespace MicroLaman
             selectionOverlay.SetRecordedScanPoints(clientPoints);
         }
 
+        /// <summary>将鼠标点限制在相机实际显示区域内。</summary>
         private static Point ClampToRectangle(Point point, Rectangle rectangle)
         {
             return new Point(
@@ -586,6 +662,7 @@ namespace MicroLaman
                 Math.Max(rectangle.Top, Math.Min(rectangle.Bottom, point.Y)));
         }
 
+        /// <summary>由任意拖拽方向的起止点生成左上到右下矩形。</summary>
         private static Rectangle NormalizeRectangle(Point start, Point end)
         {
             return Rectangle.FromLTRB(
@@ -595,6 +672,7 @@ namespace MicroLaman
                 Math.Max(start.Y, end.Y));
         }
 
+        /// <summary>根据框选区域和点数生成从左到右、再从右到左的蛇形路径。</summary>
         public bool TryGetSnakeScanPoints(out List<PointF> normalizedImagePoints, out string errorMessage)
         {
             normalizedImagePoints = new List<PointF>();
@@ -626,11 +704,13 @@ namespace MicroLaman
             return true;
         }
 
+        /// <summary>按默认 768 像素级配准尺寸取得一张未来灰度帧。</summary>
         internal GrayFrameSnapshot CaptureGrayFrame(int framesToSkip, int timeoutMilliseconds, CancellationToken cancellationToken)
         {
             return CaptureGrayFrame(framesToSkip, timeoutMilliseconds, cancellationToken, 768);
         }
 
+        /// <summary>等待指定数量的新帧后，取得指定最大尺寸的灰度快照。</summary>
         internal GrayFrameSnapshot CaptureGrayFrame(
             int framesToSkip,
             int timeoutMilliseconds,
@@ -677,6 +757,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>等待相机产生指定数量的新帧，用于确保平台移动后的画面已经刷新。</summary>
         internal void WaitForFreshFrames(int count, int timeoutMilliseconds, CancellationToken cancellationToken)
         {
             long target = Interlocked.Read(ref capturedFrameSequence) + Math.Max(1, count);
@@ -696,11 +777,13 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>在 UI 线程设置框选区域相对原始图像的临时像素位移。</summary>
         internal void SetTemporaryOverlayPixelOffset(float pixelX, float pixelY)
         {
             RunOnUiThread(() => ApplyTemporaryOverlayPixelOffset(pixelX, pixelY));
         }
 
+        /// <summary>应用像素位移并立即刷新线程安全的标注绘图模型。</summary>
         private void ApplyTemporaryOverlayPixelOffset(float pixelX, float pixelY)
         {
             lock (overlayModelSync)
@@ -716,17 +799,11 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>开始新扫描前清空历史红点并把框选区域恢复到原始位置。</summary>
         internal void PrepareForNewScan()
         {
             RunOnUiThread(() =>
             {
-                stageTrackingEnabled = false;
-                trackingCalibration = null;
-                lock (liveTrackingSync)
-                {
-                    liveTrackingEnabled = false;
-                    liveTrackingRegistration = null;
-                }
                 displayedSelectionImageRegion = selectionImageRegion;
                 recordedScanPointsImage.Clear();
                 if (selectionOverlay != null)
@@ -735,6 +812,7 @@ namespace MicroLaman
             });
         }
 
+        /// <summary>记录移动后位于视野中心的样品点，供红点诊断显示。</summary>
         internal void RecordScanVisitAtViewCenter(float imageShiftX, float imageShiftY)
         {
             RunOnUiThread(() =>
@@ -751,79 +829,7 @@ namespace MicroLaman
             });
         }
 
-        internal void BeginStageTracking(StagePosition origin, StagePixelCalibration calibration)
-        {
-            RunOnUiThread(() =>
-            {
-                trackingOrigin = origin;
-                trackingCalibration = calibration;
-                stageTrackingEnabled = true;
-                displayedSelectionImageRegion = selectionImageRegion;
-                UpdateSelectionOverlayFromImageCoordinates();
-            });
-        }
-
-        internal void BeginLiveOverlayTracking(GrayFrameSnapshot originFrame)
-        {
-            PreparedImageRegistration registration = ImageRegistration.Prepare(originFrame);
-            lock (liveTrackingSync)
-            {
-                liveTrackingRegistration = registration;
-                liveTrackingEnabled = true;
-            }
-        }
-
-        private void UpdateLiveOverlayTracking()
-        {
-            PreparedImageRegistration registration;
-            lock (liveTrackingSync)
-            {
-                if (!liveTrackingEnabled || liveTrackingRegistration == null)
-                    return;
-                registration = liveTrackingRegistration;
-            }
-
-            try
-            {
-                GrayFrameSnapshot current = CreateGrayFrameSnapshot(frame, 384);
-                ImageTranslation translation;
-                lock (liveTrackingSync)
-                {
-                    if (!liveTrackingEnabled || !ReferenceEquals(registration, liveTrackingRegistration))
-                        return;
-                    translation = ImageRegistration.MeasureTranslation(registration, current);
-                }
-                if (translation.Confidence < 4)
-                    return;
-
-                ApplyTemporaryOverlayPixelOffset(
-                    (float)translation.X,
-                    (float)translation.Y);
-            }
-            catch (InvalidOperationException)
-            {
-                // A single low-quality frame must not stop camera acquisition.
-            }
-        }
-
-        internal void UpdateTrackedStagePosition(StagePosition position)
-        {
-            RunOnUiThread(() =>
-            {
-                if (!stageTrackingEnabled || trackingCalibration == null || selectionImageRegion.IsEmpty)
-                    return;
-                PointF shift = trackingCalibration.StageDeltaToImage(
-                    position.X - trackingOrigin.X,
-                    position.Y - trackingOrigin.Y);
-                displayedSelectionImageRegion = new RectangleF(
-                    selectionImageRegion.X + shift.X / imageWidth,
-                    selectionImageRegion.Y + shift.Y / imageHeight,
-                    selectionImageRegion.Width,
-                    selectionImageRegion.Height);
-                UpdateSelectionOverlayFromImageCoordinates();
-            });
-        }
-
+        /// <summary>在采集线程中满足等待中的单次灰度快照请求。</summary>
         private void FulfillSnapshotRequest()
         {
             int requestId;
@@ -861,6 +867,7 @@ namespace MicroLaman
             snapshotReady.Set();
         }
 
+        /// <summary>复制 SDK 帧缓冲并生成用于配准的降采样灰度图。</summary>
         private GrayFrameSnapshot CreateGrayFrameSnapshot(TucamFrame source, int maximumDimension)
         {
             int width = source.Width;
@@ -921,6 +928,7 @@ namespace MicroLaman
             return new GrayFrameSnapshot(outputWidth, outputHeight, width, height, samplingStep, gray);
         }
 
+        /// <summary>取消当前快照请求，并使迟到结果失效。</summary>
         private void CancelSnapshotRequest()
         {
             lock (snapshotStateSync)
@@ -930,11 +938,13 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>在 UI 线程隐藏相机状态提示。</summary>
         private void HideStatusLabel()
         {
             RunOnUiThread(() => statusLabel.Visible = false);
         }
 
+        /// <summary>在 UI 线程显示指定颜色的相机状态信息。</summary>
         private void ShowCameraStatus(string message, Color color)
         {
             RunOnUiThread(() =>
@@ -946,11 +956,13 @@ namespace MicroLaman
             });
         }
 
+        /// <summary>以橙红色显示相机错误。</summary>
         private void ShowCameraError(string message)
         {
             ShowCameraStatus(message, Color.OrangeRed);
         }
 
+        /// <summary>安全地将界面更新投递到 UI 线程。</summary>
         private void RunOnUiThread(Action action)
         {
             if (IsDisposed || !IsHandleCreated)
@@ -968,6 +980,7 @@ namespace MicroLaman
             }
         }
 
+        /// <summary>预览控件缩放时更新绘制尺寸和标注坐标。</summary>
         private void PreviewPanel_Resize(object sender, EventArgs e)
         {
             previewWidth = previewPanel.ClientSize.Width;
@@ -976,9 +989,14 @@ namespace MicroLaman
             UpdateSelectionOverlayFromImageCoordinates();
         }
 
+        /// <summary>窗口关闭时释放计时器、相机和绘图状态。</summary>
         private void CameraShowForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             CancelRectangleDrawing();
+            Image selectionToolIcon = rectangleToolButton.Image;
+            rectangleToolButton.Image = null;
+            if (selectionToolIcon != null)
+                selectionToolIcon.Dispose();
             selectionOverlay = null;
             if (performanceTimer != null)
             {
@@ -990,6 +1008,7 @@ namespace MicroLaman
             StopCamera();
         }
 
+        /// <summary>按 SDK 要求依次停止采集并释放绘制器、缓冲区、设备和 API。</summary>
         private void StopCamera()
         {
             capturing = false;
